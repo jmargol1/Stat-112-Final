@@ -1,0 +1,303 @@
+---
+title: "Introduction to Data Science  Final Code Appendix"
+author: "Joe Margolis, Quinn Hodgman, Max Menache, Devinn Chi, Graham Elliot"
+date: "11/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1 Names & Workflow
+Joe Margolis
+Quinn Hodgman
+Max Menache
+Devinn Chi
+Graham Elliot
+
+## 2 Topic & Research Questions
+Topic: Baseball
+Research question 1: How have batting average trends compared over time to OPS+ (might change OPS+)?
+  Playoff vs. regular season
+  Team averages stats, comparing playoff and non-playoff teams
+  Single player averages, comparing all stars and non-all stars
+  
+Research question 2: Finding trends in each of the typed of hits over time, comparing singles, doubles, triples, homers.
+  
+Research question 3: How do players usually perform after a mid-season trade?
+
+Research question 4: Which type of hit (single, double, triple, HR) best correlates with the value of the player?
+  
+  
+```{r}
+library(Lahman)
+data(Batting)
+data(Teams)
+data(BattingPost)
+library(tufte)
+library(tidyverse)
+library(ggplot2)
+library(ggmap)
+library(tint)
+library(rvest)
+library(patchwork)
+options(htmltools.dir.version = FALSE)
+```
+  
+## How have batting average trends compared over time to OPS+ (might change OPS+)?
+
+```{r fig.width=12}
+baseballReference = read_html("https://www.baseball-reference.com/leagues/majors/bat.shtml#teams_standard_batting")
+
+year = baseballReference %>%
+  html_nodes("#teams_standard_batting a") %>%
+  html_text() %>%
+  strtoi()
+
+ave = baseballReference %>%
+  html_nodes("#teams_standard_batting .right:nth-child(19)") %>%
+  html_text()
+
+ops = baseballReference %>%
+  html_nodes("#teams_standard_batting .right:nth-child(22)") %>%
+  html_text()
+
+RefhittingStats = tibble(Year = year, Average = as.numeric(ave), OPS = as.numeric(ops))
+
+RefhittingStats = RefhittingStats %>%
+  filter(Year >= 1955) %>%
+  pivot_longer(c(Average, OPS), names_to = "category", values_to = "value")
+
+ggplot(RefhittingStats, aes(x = Year, y = value, color = category)) + 
+  geom_point() + 
+  labs(title = "MLB Hitting Stats by Year") + 
+  geom_smooth() + 
+  facet_wrap(~category, scales = "free")
+```
+
+## How Do Players Perform following a mid-season trade
+```{r}
+hittingStats <- Batting %>%
+  mutate(BA = H/AB) %>%
+  filter(yearID >=1955) 
+```
+
+```{r}
+tradedOnly <- hittingStats %>%
+  group_by(yearID, playerID) %>%
+  mutate(num_entry = n()) %>% # add variable that equals the number of entries
+  ungroup() %>%
+  filter(num_entry > 1) %>%
+  na.omit()# keep rows that have 1 entry per year/name or if they have more than 1, make sure the team = 'TOT'
+```
+
+### Batting Average
+```{r}
+ggplot(tradedOnly, aes(y = BA, x = yearID, color = as.factor(stint))) +
+  geom_point()+
+  geom_smooth()
+```
+```{r}
+tradedOnlyYearBA <- tradedOnly %>%
+  group_by(yearID, stint) %>%
+  summarise(yAB = sum(AB), yH = sum(H)) %>%
+  mutate(yBA = yH/yAB)
+```
+
+```{r}
+ggplot(tradedOnlyYearBA, aes(y = yBA, x = yearID, color = as.factor(stint))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Batting Averages before and after players were traded in each year", y="Combined Batting Averages", x = "Year", caption = "Figure 1: Combined batting averages for people before they were traded and after thay were traded each year.", color = "Stint")
+```
+This shows that there is an increase in batting averages after a player is traded, but the increase is slowly closing
+
+#### Batting Average Postseason
+```{r}
+Postseason <- BattingPost %>%
+  filter(yearID > 1955) %>%
+  group_by(playerID, yearID, teamID) %>%
+  summarise(PG = sum(G), PAB = sum(AB), PR = sum(R), PH = sum(H), `P2B` = sum(`X2B`), `P3B` = sum(`X3B`), PHR = sum(HR), PRBI = sum(RBI), PSB = sum(SB), PCS = sum(CS), PBB = sum(BB), PSO = sum(SO), PIBB = sum(IBB), PHBP = sum(HBP), PSH = sum(SH), PSF = sum(SF), PGIDP = sum(GIDP)) %>%
+  na.omit()
+
+ShowTrade <- hittingStats %>%
+  group_by(yearID, playerID) %>%
+  mutate(num_entry = n()) %>% # add variable that equals the number of entries
+  ungroup() %>%
+  na.omit()
+
+PostShowTradeYear <- Postseason %>%
+  left_join(ShowTrade, by = c("playerID"="playerID", "yearID" = "yearID", "teamID" = "teamID"))%>%
+  group_by(yearID, num_entry) %>%
+  summarise(YPG = sum(PG), YPAB = sum(PAB), YPR = sum(PR), YPH = sum(PH), `YP2B` = sum(`P2B`), `YP3B` = sum(`P3B`), YPHR = sum(PHR), YPRBI = sum(PRBI), YPSB = sum(PSB), YPCS = sum(PCS), YPBB = sum(PBB), YPSO = sum(PSO), YPIBB = sum(PIBB), YPHBP = sum(PHBP), YPSH = sum(PSH), YPSF = sum(PSF), YPGIDP = sum(PGIDP)) %>%
+  mutate(YPBA = YPH/YPAB) %>%
+  na.omit()
+
+ggplot(PostShowTradeYear, aes(y = YPBA, x = yearID, color = as.factor(num_entry))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Playoff Batting Averages of players traded vs. Not traded", y="Combined Playoff Batting Averages", x = "Year", caption = "Figure 1: Combined batting averages for people before they were traded and after thay were traded each year.", color = "Stint")
+```
+
+```{r}
+tradedOnlyYearOPS <- tradedOnly %>%
+  mutate(PA = AB + BB + HBP + SF + SH) %>%
+  mutate(TOB = H + BB + HBP) %>%
+  mutate(Singles = H - `X2B` - `X3B` - `HR`) %>%
+  mutate(TB = Singles + (2*`X2B`) + (3*`X3B`)+ (4*HR)) %>%
+  group_by(yearID, stint) %>%
+  summarise(yPA = sum(PA), yTOB = sum(TOB), yTB = sum(TB), yAB = sum(AB)) %>%
+  mutate(yOBP = yTOB/yPA) %>%
+  mutate(ySLG = yTB/yAB) %>%
+  mutate(yOPS = yOBP + ySLG)
+
+PostShowTradeYearOPS <- PostShowTradeYear %>%
+  mutate(YPPA = YPAB + YPBB + YPHBP + YPSF + YPSH) %>%
+  mutate(YPTOB = YPH + YPBB + YPHBP) %>%
+  mutate(YPSingles = YPH - `YP2B` - `YP3B` - `YPHR`) %>%
+  mutate(YPTB = YPSingles + (2*`YP2B`) + (3*`YP3B`)+ (4*YPHR))  %>%
+  mutate(YPOBP = YPTOB/YPPA) %>%
+  mutate(YPSLG = YPTB/YPAB) %>%
+  mutate(YPOPS = YPOBP + YPSLG)
+ 
+
+```
+
+```{r}
+ggplot(tradedOnlyYearOPS, aes(y = yOBP, x = yearID, color = as.factor(stint))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "On Base Percentages before and after players were traded in each year", y="Combined On Base Percentages", x = "Year", caption = "Figure 1: Combined On Baseb Percentages for people before they were traded and after thay were traded each year.", color = "Stint")
+```
+
+```{r}
+ggplot(tradedOnlyYearOPS, aes(y = ySLG, x = yearID, color = as.factor(stint))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Slugging Percentages before and after players were traded in each year", y="Combined Slugging Percentages", x = "Year", caption = "Figure 1: Combined Slugging Percentages for people before they were traded and after thay were traded each year.", color = "Stint")
+```
+
+```{r}
+ggplot(tradedOnlyYearOPS, aes(y = yOPS, x = yearID, color = as.factor(stint))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "OPS before and after players were traded in each year", y="Combined OPS", x = "Year", caption = "Figure 1: Combined OPS for people before they were traded and after thay were traded each year.", color = "Stint")
+```
+The following graphs show the same trends in these other stats as batting average did.
+
+```{r}
+ggplot(PostShowTradeYearOPS, aes(y = YPOBP, x = yearID, color = as.factor(num_entry))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Playoff On Base Percentage of players traded vs. Not traded", y="Combined Playoff On Base Percentage", x = "Year", caption = "Figure 1: Combined on base percentage for people before they were traded and after thay were traded each year.", color = "Stint")
+
+ggplot(PostShowTradeYearOPS, aes(y = YPSLG, x = yearID, color = as.factor(num_entry))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Playoff Slugging Percentage of players traded vs. Not traded", y="Combined Playoff Slugging Percentage", x = "Year", caption = "Figure 1: Combined slugging percentage for people before they were traded and after thay were traded each year.", color = "Stint")
+
+ggplot(PostShowTradeYearOPS, aes(y = YPOPS, x = yearID, color = as.factor(num_entry))) +
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Playoff On Base Plus Slugging Percentage of players traded vs. Not traded", y="Combined Playoff On Base Plus Slugging Percentage", x = "Year", caption = "Figure 1: Combined on base plus slugging percentage for people before they were traded and after thay were traded each year.", color = "Stint")
+```
+
+
+## What are trends in different types of hits?
+
+```{r}
+HitStatsYear <- Batting %>%
+  mutate(BA = H/AB) %>%
+  filter(yearID >=1955) %>%
+  filter(yearID <= 2019) %>%
+  filter(AB >= 100) %>%
+  mutate(singles = H - `X2B` - `X3B` - HR) %>%
+  group_by(yearID) %>%
+  summarise(singles = sum(singles), doubles = sum(`X2B`), triples = sum(`X3B`), HR = sum(HR)) %>%
+  pivot_longer(c(singles, doubles, triples, HR), names_to = "HitType", values_to = "Total", names_prefix = "Total_") 
+```
+
+```{r}
+R1 <- ggplot(HitStatsYear, aes(x=yearID, y= Total, color = HitType)) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Year", 
+       y = "",
+       title = "Number of Hits Per Type of Hit")
+R1
+
+R2 <- ggplot(HitStatsYear, aes(x=yearID, y= Total, fill = HitType)) +
+ geom_col(position = "fill")+
+  labs(x = "Year", 
+       y = "",
+       title = "Variation of Hits Shown as a Percentage")
+R2
+```
+
+Everything shows similar overall trends but in the last few years singles have decreased drastically towards the other types of hits. Other than that thought peaks and lows are similar across all types of hits.
+
+```{r}
+HitStatsYearPost <- BattingPost %>%
+  mutate(BA = H/AB) %>%
+  filter(yearID >=1955) %>%
+  filter(yearID <= 2019)  %>%
+  mutate(singles = H - `X2B` - `X3B` - HR) %>%
+  group_by(yearID) %>%
+  summarise(singles = sum(singles), doubles = sum(`X2B`), triples = sum(`X3B`), HR = sum(HR)) %>%
+  pivot_longer(c(singles, doubles, triples, HR), names_to = "HitType", values_to = "Total", names_prefix = "Total_")
+```
+
+```{r}
+P1 <- ggplot(HitStatsYearPost, aes(x=yearID, y= Total, color = HitType)) +
+  geom_line() +
+  geom_point()+
+  labs(x = "Year", 
+       y = "",
+       title = "Number of Hits Per Type of Hit (Postseason)")
+P1
+
+P2 <- ggplot(HitStatsYearPost, aes(x=yearID, y= Total, fill = HitType)) +
+ geom_col(position = "fill") +
+  labs(x = "Year", 
+       y = "",
+       title = "Variation of Hits Shown as a Percentage (Postseason")
+P2
+```
+```{r}
+All <- (R1/R2) | (P1/P2)
+All+plot_annotation(title = 'Comparing Hits Per Year as a Whole and in The Postseason') 
+```
+
+- Analyzing how each type of hit (single, double, triple, HR) correlates with a player's value to their team
+
+Research question 4: Which type of hit (single, double, triple, HR) best correlates with the value of the player?
+
+
+
+```{r}
+Fangraphs <- read_csv("Fangraphs.csv")
+```
+
+```{r}
+
+colnames(Fangraphs) <- c('Season','Name', 'Team', 'WAR', 'Single', 'Double', 'Triple', 'HR', 'playerid')
+
+ggplot(Fangraphs, aes(x = Single, y = WAR)) + 
+  geom_point() +
+  geom_smooth()
+
+ggplot(Fangraphs, aes(x = Double, y = WAR)) + 
+  geom_point() +
+  geom_smooth()
+
+ggplot(Fangraphs, aes(x = Triple, y = WAR)) + 
+  geom_point() +
+  geom_smooth()
+
+ggplot(Fangraphs, aes(x = HR, y = WAR)) + 
+  geom_point() +
+  geom_smooth()
+
+```
+These graphs show how each type of hit correlates with WAR. WAR is a stat that is best predictive of a player's value, showing how many Team Wins they are worth when compared to a replacement-level player. Based on these graphs, it shows that doubles and home runs are generally more predictive of a player's value rather than triples and singles. In baseball today, teams prioritize players who hit a lot of home runs and doubles, so this backs that up, showing that, generally, the more doubles and home runs that a player hits, the more valuable the player is to his team. 
